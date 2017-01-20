@@ -32,7 +32,47 @@ class MyWebServer(SocketServer.BaseRequestHandler):
     def handle(self):
         self.data = self.request.recv(1024).strip()
         print ("Got a request of: %s\n" % self.data)
-        self.request.sendall("OK")
+        #self.request.sendall("OK")
+
+        self.dbgPrt("type(self.data)",repr(type(self.data)))
+
+        splitedData = self.splitComponet(self.data)
+        self.dbgPrt("splited data",repr(splitedData))
+
+        # variables of request
+        action = splitedData[0]
+        path = 'www' + splitedData[1]
+        protocal = splitedData[2]
+
+        # varify the path
+
+        # response
+        response = self.response(path + 'index.html')
+        self.request.sendall(response)
+
+    def response(self,path):
+
+        fileType = 'Content-Type: text/html\r\n\r\n'
+        
+        # open and read file
+        File = open(path, 'r')
+        contents = File.read()
+        File.close()
+           
+        # create HTTP
+        response = 'HTTP/1.1 200 OK\r\n' + \
+                   'GMT\r\n' + \
+                   'Content-Length:' + str(len(contents)) + '\r\n' + \
+                   fileType + contents
+        return response
+        
+    def splitComponet(self, requestLine):
+        result = requestLine.split("\r\n")
+        result = result[0].split()
+        return result
+
+    def dbgPrt(self, markerStr, contentStr):
+        print ("%s: %s\n" % (markerStr, contentStr))
 
 if __name__ == "__main__":
     HOST, PORT = "localhost", 8080
