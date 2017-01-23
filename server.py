@@ -2,6 +2,7 @@
 import SocketServer, errno
 
 # Copyright 2013 Abram Hindle, Eddie Antonio Santos
+# Copyright 2016 Chenrui Lei
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,23 +29,23 @@ import SocketServer, errno
 
 
 class MyWebServer(SocketServer.BaseRequestHandler):
+    root_path = './www'
+    host_name = 'http://127.0.0.1:8080'
 
     def handle(self):
         self.data = self.request.recv(1024).strip()
         print ("Got a request of: %s\n" % self.data)
-        #self.request.sendall("OK")
 
-        #self.dbgPrt("type(self.data)",repr(type(self.data)))
-
+        # decoding HTTP request
         splitedData = self.splitReqstComponent(self.data)
         if len(splitedData) < 3:
             return
-        #self.dbgPrt("splited data",repr(splitedData))
+        #print(splitedData)
 
         # variables of request and checker
         action = splitedData[0]
         action_is_valid = False
-        path = 'www' + splitedData[1]
+        path = splitedData[1]
         path_is_valid = False
         protocal = splitedData[2]
 
@@ -55,10 +56,11 @@ class MyWebServer(SocketServer.BaseRequestHandler):
         if action_is_valid:
             path_is_valid, response = self.pathVarify(path)
 
-        # response
+        # pull contents
         if path_is_valid:
             response = self.pullFileContent(path)
 
+        # response
         self.request.sendall(response)
         #print ("Sent a response of: %s\n" % response)
 
@@ -66,12 +68,12 @@ class MyWebServer(SocketServer.BaseRequestHandler):
         if (action == 'GET'):
             actChecker = True
             response = None
+
+        # Invalid method found
         else:
             actChecker = False
-            response = self.genRspd('405 Method not allow',\
-                                    'text/html',\
-                                    '<p>405 Method not allow<p>', \
-                                    '')
+            response = self.genHTTPErrorRspd(405,'')
+
         return actChecker, response
 
     def pathVarify(self, path):
@@ -80,17 +82,18 @@ class MyWebServer(SocketServer.BaseRequestHandler):
         pathList = pathList.split('/')
 
         for direction in pathList:
+
             if (direction == '..') and len(pathCheckingList)!=0:
                 pathCheckingList.pop()
             elif (direction == '.'):
                 pass
+
+            # Invalid path found
             elif (direction == '..') and len(pathCheckingList)==0:
                 pathChecker = False
-                response = self.genRspd('404 Page not found',\
-                                        'text/html',\
-                                        '<p>404 Page not found<p>', \
-                                        '')
+                response = self.genHTTPErrorRspd(404,'')
                 return pathChecker, response
+
             else:
                 pathCheckingList.append(direction)
 
@@ -100,49 +103,61 @@ class MyWebServer(SocketServer.BaseRequestHandler):
         return pathChecker, response
 
     def pullFileContent(self,path):
-        mimeType = 'text/'
-        extraHeader = ''
 
-        # the direction
+        # if serve from a direction
         if (path[-1]=='/'):
             path = path  + 'index.html'
 
-        # figure out the mime type
-        mimeTypeChecker = path.split('.')
-        mimeTypeChecker = mimeTypeChecker[-1]
-        if (mimeTypeChecker == 'html'):
-            mimeType = mimeType + 'html'
-        elif (mimeTypeChecker == 'css'):
-            mimeType = mimeType + 'css'
-        else:
-            mimeType = mimeType + 'html'
-
         # get the content from file
         try:
-            File = open(path, 'r')
+            File = open(self.root_path + path, 'r')
             contents = File.read()
             File.close()
+
         except IOError, e:
 
             # 404 not found
             if (e.errno == errno.ENOENT):
-                HTTPStatus = '404 Page not found'
-                contents = '<p>404 Page not found<p>'
+                response = self.genHTTPErrorRspd(404,'')
 
             # 302 redirection
             elif (e.errno == errno.EISDIR):
-                HTTPStatus = '302 Found'
-                extraHeader = 'Location: http://127.0.0.1:8080' + path[3:] + '/'
-                contents = '<p>302 Found<p>'
+                extraHeader = 'Location: ' + self.host_name + path + '/'
+                response = self.genHTTPErrorRspd(302,extraHeader)
 
             else:
                 raise
-        else:
-            HTTPStatus = '200 OK'
 
-        # create HTTP
-        response = self.genRspd(HTTPStatus, mimeType, contents, extraHeader)
+        else:
+
+            # 200 OK
+            HTTPStatus = '200 OK'
+            mimeType = self.findMimeType(self.root_path + path) # figure out the mime type
+            response = self.genRspd(HTTPStatus, mimeType, contents, '')
+
         return response
+
+    def findMimeType(self, fullPath):
+
+        # variable
+        mimeType = 'text/'
+
+        # pre-processing
+        mimeTypeChecker = fullPath.split('.')
+        mimeTypeChecker = mimeTypeChecker[-1]
+
+        # processing
+        if (len(mimeTypeChecker)>1):
+            if (mimeTypeChecker == 'html'):
+                mimeType = mimeType + 'html'
+            elif (mimeTypeChecker == 'css'):
+                mimeType = mimeType + 'css'
+            else:
+                mimeType = mimeType + 'plain'
+        else:
+            mimeType = mimeType + 'plain'
+
+        return mimeType
 
     def genRspd(self, HTTPStatus, mimeType, contents, extraHeader):
         response = 'HTTP/1.1 ' + HTTPStatus + '\r\n' + \
@@ -154,23 +169,22 @@ class MyWebServer(SocketServer.BaseRequestHandler):
 
     def genHTTPErrorRspd(self, statusCode, extraHeader):
         if statusCode==302:
-            pass
+            HTTPStatus = '302 Found'
+            contents = '<p>302 Found<p>\n'
         elif statusCode==404:
-            pass
+            HTTPStatus = '404 Page not found'
+            contents = '<p>404 Page not found<p>\n'
         elif statusCode==405:
-            pass
-        else:
-            pass
+            HTTPStatus = '405 Method not allow'
+            contents = '<p>405 Method not allow<p>\n'
 
-        return response
+        return self.genRspd(HTTPStatus, 'text/html', contents, extraHeader)
 
     def splitReqstComponent(self, requestLine):
         result = requestLine.split("\r\n")
         result = result[0].split()
         return result
 
-    def dbgPrt(self, markerStr, contentStr):
-        print ("%s: %s\n" % (markerStr, contentStr))
 
 if __name__ == "__main__":
     HOST, PORT = "localhost", 8080
